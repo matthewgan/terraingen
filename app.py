@@ -198,5 +198,102 @@ def generate():
         print("Bad get")
         return render_template('generate.html', error="Need to use POST, not GET")
 
+@app.route('/generate_rectangle', methods=['GET', 'POST'])
+def generate_rectangle():
+    if request.method == 'POST':
+        # parse and sanitise the input
+        try:
+            min_lat = float(request.form['min_lat'])
+            max_lat = float(request.form['max_lat'])
+            min_lon = float(request.form['min_lon'])
+            max_lon = float(request.form['max_lon'])
+            version = int(request.form['version'])
+            
+            # Validate latitude and longitude ranges
+            assert min_lat < max_lat
+            assert min_lon < max_lon
+            assert min_lat >= -90 and max_lat <= 90
+            assert min_lon >= -180 and max_lon <= 180
+            assert version in [1, 3]
+            
+            # Ensure reasonable bounds
+            min_lat = clamp(min_lat, -90, 90)
+            max_lat = clamp(max_lat, -90, 90)
+            min_lon = clamp(min_lon, -180, 180)
+            max_lon = clamp(max_lon, -180, 180)
+            
+        except:
+            print("Bad data for rectangle generation")
+            return render_template('generate.html', error="Error with rectangle input parameters")
+
+        version = int(version)
+        print("Generate Rectangle: %.9f-%.9f lat, %.9f-%.9f lon, version=%u" % (min_lat, max_lat, min_lon, max_lon, version))
+
+        # UUID for this terrain generation
+        uuidkey = str(uuid.uuid1())
+
+        # Flag for if user wanted a tile outside +-84deg latitude
+        outsideLat = None
+
+        # get a list of files required to cover rectangular area
+        filelist = []
+        done = set()
+        
+        format = "4.1"
+        
+        if version == 1:
+            tile_path = tile_path1
+        else:
+            tile_path = tile_path3
+
+        # Calculate the step size for tile coverage (approximately 1 degree)
+        lat_step = 1.0
+        lon_step = 1.0
+        
+        # Iterate through the rectangular area
+        lat = min_lat
+        while lat <= max_lat:
+            lon = min_lon
+            while lon <= max_lon:
+                lat_int = int(math.floor(lat))
+                lon_int = int(math.floor(lon))
+                tag = (lat_int, lon_int)
+                if tag in done:
+                    lon += lon_step
+                    continue
+                done.add(tag)
+                # make sure tile is inside the 84deg lat limit
+                if abs(lat_int) <= 84:
+                    filelist.append(os.path.join(tile_path, getDatFile(lat_int, lon_int)))
+                else:
+                    outsideLat = True
+                lon += lon_step
+            lat += lat_step
+
+        # remove duplicates
+        filelist = list(dict.fromkeys(filelist))
+        print(filelist)
+
+        #compress
+        success = compressFiles(filelist, uuidkey, version)
+
+        # as a cleanup, remove any generated terrain older than 24H
+        for f in os.listdir(output_path):
+            if os.stat(os.path.join(output_path, f)).st_mtime < time.time() - 24 * 60 * 60:
+                print("Removing old file: " + str(os.path.join(output_path, f)))
+                os.remove(os.path.join(output_path, f))
+
+        if success:
+            print("Generated " + "/terrain/" + uuidkey + ".zip")
+            return render_template('generate.html', urlkey="/userRequestTerrain/" + uuidkey + ".zip",
+                                   uuidkey=uuidkey, outsideLat=outsideLat)
+        else:
+            print("Failed " + "/terrain/" + uuidkey + ".zip")
+            return render_template('generate.html', error="Cannot generate terrain",
+                                   uuidkey=uuidkey)
+    else:
+        print("Bad get for rectangle")
+        return render_template('generate.html', error="Need to use POST, not GET")
+
 if __name__ == "__main__":
     app.run()
