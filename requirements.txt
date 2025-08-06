@@ -6,3 +6,10 @@ mavproxy
 fastcrc
 pytest
 Flask-Limiter==2.0.3
+# FastAPI dependencies
+fastapi
+uvicorn[standard]
+pydantic
+slowapi
+jinja2
+python-multipart
